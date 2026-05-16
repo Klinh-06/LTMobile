@@ -11,7 +11,7 @@ import { doctors } from '../../data/mockData';
 
 export default function RescheduleScreen({ navigation, route }) {
   const { appointment } = route.params;
-  const { rescheduleAppointment, appointments } = useApp();
+  const { rescheduleAppointment, appointments, globalBookings } = useApp();
   const [selectedDate, setSelectedDate] = useState(appointment.date);
   const [selectedTime, setSelectedTime] = useState(appointment.time);
   const [loading, setLoading] = useState(false);
@@ -25,11 +25,23 @@ export default function RescheduleScreen({ navigation, route }) {
     return doctor.schedule[dayKey] || [];
   };
 
-  const isSlotTaken = (date, time) => {
-    return appointments.some(
-      a => a.doctorId === appointment.doctorId && a.date === date && a.time === time &&
-        a.status !== 'cancelled' && a.id !== appointment.id
+  // 'full'    — bác sĩ đã có người khác đặt
+  // 'conflict'— bạn có lịch khác cùng giờ
+  // false     — slot trống
+  const slotState = (date, time) => {
+    const full = globalBookings.some(
+      b => b.doctorId === appointment.doctorId &&
+           b.date === date && b.time === time &&
+           b.appointmentId !== appointment.id
     );
+    if (full) return 'full';
+    const conflict = appointments.some(
+      a => a.status === 'upcoming' &&
+           a.date === date && a.time === time &&
+           a.id !== appointment.id
+    );
+    if (conflict) return 'conflict';
+    return false;
   };
 
   const availableSlots = getDoctorSlots(selectedDate);
@@ -52,11 +64,22 @@ export default function RescheduleScreen({ navigation, route }) {
           text: 'Xác nhận',
           onPress: async () => {
             setLoading(true);
-            await rescheduleAppointment(appointment.id, selectedDate, selectedTime);
-            setLoading(false);
-            Alert.alert('Thành công', 'Lịch hẹn đã được cập nhật!', [
-              { text: 'OK', onPress: () => navigation.pop(1) },
-            ]);
+            try {
+              await rescheduleAppointment(appointment.id, selectedDate, selectedTime);
+              setLoading(false);
+              Alert.alert('Thành công', 'Lịch hẹn đã được cập nhật!', [
+                { text: 'OK', onPress: () => navigation.pop(1) },
+              ]);
+            } catch (err) {
+              setLoading(false);
+              if (err.message === 'slot_taken') {
+                Alert.alert('Khung giờ đã đầy', 'Bác sĩ đã có bệnh nhân khác đặt khung giờ này. Vui lòng chọn giờ khác.');
+              } else if (err.message === 'time_conflict') {
+                Alert.alert('Trùng lịch', 'Bạn đã có lịch khám khác cùng khung giờ này.');
+              } else {
+                Alert.alert('Lỗi', 'Không thể đổi lịch. Vui lòng thử lại.');
+              }
+            }
           },
         },
       ]
@@ -120,19 +143,27 @@ export default function RescheduleScreen({ navigation, route }) {
           ) : (
             <View style={styles.timeGrid}>
               {availableSlots.map(t => {
-                const taken = isSlotTaken(selectedDate, t);
+                const state = slotState(selectedDate, t);
+                const blocked = !!state;
                 return (
                   <TouchableOpacity
                     key={t}
                     style={[
                       styles.timeChip,
-                      t === selectedTime && styles.timeChipSelected,
-                      taken && { opacity: 0.4 },
+                      t === selectedTime && !blocked && styles.timeChipSelected,
+                      state === 'full' && styles.timeChipFull,
+                      state === 'conflict' && styles.timeChipConflict,
                     ]}
-                    onPress={() => !taken && setSelectedTime(t)}
-                    disabled={taken}
+                    onPress={() => !blocked && setSelectedTime(t)}
+                    disabled={blocked}
                   >
-                    <Text style={[styles.timeText, t === selectedTime && styles.timeTextSelected]}>{t}</Text>
+                    <Text style={[
+                      styles.timeText,
+                      t === selectedTime && !blocked && styles.timeTextSelected,
+                      blocked && styles.timeTextBlocked,
+                    ]}>{t}</Text>
+                    {state === 'full' && <Text style={styles.timeBadge}>Đầy</Text>}
+                    {state === 'conflict' && <Text style={[styles.timeBadge, styles.timeBadgeConflict]}>Trùng</Text>}
                   </TouchableOpacity>
                 );
               })}
@@ -186,10 +217,15 @@ const styles = StyleSheet.create({
   selectedInfo: { fontSize: 13, color: Colors.primary, fontWeight: '600', marginTop: 10 },
   hint: { fontSize: 13, color: Colors.textSecondary, fontStyle: 'italic' },
   timeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  timeChip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.background },
+  timeChip: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.background, alignItems: 'center', minWidth: 76 },
   timeChipSelected: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  timeChipFull: { backgroundColor: Colors.border + '60', borderColor: Colors.border, opacity: 0.7 },
+  timeChipConflict: { backgroundColor: '#FFF3E0', borderColor: '#FB8C00' },
   timeText: { fontSize: 14, color: Colors.text, fontWeight: '600' },
   timeTextSelected: { color: Colors.white },
+  timeTextBlocked: { color: Colors.textSecondary },
+  timeBadge: { fontSize: 10, color: Colors.textSecondary, fontWeight: '700', marginTop: 2 },
+  timeBadgeConflict: { color: '#FB8C00' },
   bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.white, padding: 16, flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: Colors.border, gap: 12 },
   newInfo: { flex: 1 },
   newLabel: { fontSize: 11, color: Colors.textSecondary },

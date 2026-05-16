@@ -93,8 +93,10 @@ export default function MyAppointmentsScreen({ navigation }) {
               style={styles.actionBtn}
               onPress={() => navigation.navigate('RateDoctor', { appointment: item })}
             >
-              <Ionicons name="star-outline" size={14} color="#FFB300" />
-              <Text style={[styles.actionBtnText, { color: '#FFB300' }]}>Đánh giá</Text>
+              <Ionicons name={item.rating ? 'star' : 'star-outline'} size={14} color="#FFB300" />
+              <Text style={[styles.actionBtnText, { color: '#FFB300' }]}>
+                {item.rating ? `Đã đánh giá ${item.rating}★` : 'Đánh giá'}
+              </Text>
             </TouchableOpacity>
           </View>
         )}

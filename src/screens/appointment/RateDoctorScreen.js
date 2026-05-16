@@ -6,15 +6,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../theme/colors';
+import { useApp } from '../../context/AppContext';
 
 export default function RateDoctorScreen({ navigation, route }) {
   const { appointment } = route.params;
-  const [rating, setRating] = useState(0);
-  const [comment, setComment] = useState('');
+  const { rateAppointment } = useApp();
+  const [rating, setRating] = useState(appointment.rating || 0);
+  const [comment, setComment] = useState(appointment.comment || '');
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const alreadyRated = !!appointment.rating;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (rating === 0) { Alert.alert('Thông báo', 'Vui lòng chọn số sao đánh giá'); return; }
+    setSaving(true);
+    await rateAppointment(appointment.id, rating, comment);
+    setSaving(false);
     setSubmitted(true);
   };
 
@@ -42,7 +49,7 @@ export default function RateDoctorScreen({ navigation, route }) {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={Colors.white} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Đánh giá bác sĩ</Text>
+          <Text style={styles.headerTitle}>{alreadyRated ? 'Sửa đánh giá' : 'Đánh giá bác sĩ'}</Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -98,8 +105,14 @@ export default function RateDoctorScreen({ navigation, route }) {
               />
             </View>
 
-            <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
-              <Text style={styles.submitText}>Gửi đánh giá</Text>
+            <TouchableOpacity
+              style={[styles.submitBtn, saving && { opacity: 0.7 }]}
+              onPress={handleSubmit}
+              disabled={saving}
+            >
+              <Text style={styles.submitText}>
+                {saving ? 'Đang lưu...' : (alreadyRated ? 'Cập nhật đánh giá' : 'Gửi đánh giá')}
+              </Text>
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>

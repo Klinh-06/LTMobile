@@ -31,25 +31,44 @@ export const AppProvider = ({ children }) => {
     try {
       const auth = await getAuthState();
       const userData = await getUser();
-      const appts = await getAppointments();
-      const recs = await getRecords();
-      const notifs = await getNotifications();
       const setts = await getSettings();
       const gBookings = await getGlobalBookings();
 
-      const today = new Date().toISOString().split('T')[0];
-      const isDemo = userData?.email === 'demo@medicare.vn';
-      const rawAppts = appts.length > 0 ? appts : (isDemo ? getSampleAppointments() : []);
-      const cleanedAppts = rawAppts.filter(a => !(a.status === 'upcoming' && a.date < today));
-
-      setIsLoggedIn(auth);
-      setUser(userData || initialUser);
-      setAppointments(cleanedAppts);
-      setRecords(recs.length > 0 ? recs : (isDemo ? getSampleRecords() : []));
-      setNotifications(notifs.length > 0 ? notifs : []);
       setSettings(setts);
       setGlobalBookings(gBookings);
-      const savedCode = await getPasscode();
+
+      if (!auth || !userData) {
+        setIsLoggedIn(false);
+        setUser(userData || initialUser);
+        return;
+      }
+
+      const userId = userData.id;
+      const today = new Date().toISOString().split('T')[0];
+      const isDemo = userId === 'u1';
+
+      let appts = await getAppointments(userId);
+      let recs = await getRecords(userId);
+      const notifs = await getNotifications(userId);
+
+      // Seed dữ liệu mẫu cho tài khoản demo nếu lần đầu
+      if (appts.length === 0 && isDemo) {
+        appts = getSampleAppointments();
+        await saveAppointments(userId, appts);
+      }
+      if (recs.length === 0 && isDemo) {
+        recs = getSampleRecords();
+        await saveRecords(userId, recs);
+      }
+
+      const cleanedAppts = appts.filter(a => !(a.status === 'upcoming' && a.date < today));
+
+      setIsLoggedIn(true);
+      setUser(userData);
+      setAppointments(cleanedAppts);
+      setRecords(recs);
+      setNotifications(notifs);
+      const savedCode = await getPasscode(userId);
       setPasscodeEnabled(!!savedCode);
     } catch (e) {
       console.log('Load error', e);
@@ -74,24 +93,34 @@ export const AppProvider = ({ children }) => {
       profileKeys.forEach(k => { if (savedUser[k] != null) userData[k] = savedUser[k]; });
     }
 
-    const lastId = await getLastUserId();
-    if (lastId !== String(userData.id)) {
-      setRecordsUnlocked(false);
-      const isDemo = userData.id === 'u1';
-      const today = new Date().toISOString().split('T')[0];
-      const newAppts = isDemo
-        ? getSampleAppointments().filter(a => !(a.status === 'upcoming' && a.date < today))
-        : [];
-      const newRecs = isDemo ? getSampleRecords() : [];
-      setAppointments(newAppts);
-      setRecords(newRecs);
-      setNotifications([]);
-      await saveAppointments(newAppts);
-      await saveRecords(newRecs);
-      await saveNotifications([]);
-      await saveLastUserId(userData.id);
+    const userId = userData.id;
+    const today = new Date().toISOString().split('T')[0];
+    const isDemo = userId === 'u1';
+
+    // Mỗi tài khoản có vùng dữ liệu riêng — load đúng key của user này
+    let appts = await getAppointments(userId);
+    let recs = await getRecords(userId);
+    const notifs = await getNotifications(userId);
+
+    if (appts.length === 0 && isDemo) {
+      appts = getSampleAppointments();
+      await saveAppointments(userId, appts);
+    }
+    if (recs.length === 0 && isDemo) {
+      recs = getSampleRecords();
+      await saveRecords(userId, recs);
     }
 
+    const cleanedAppts = appts.filter(a => !(a.status === 'upcoming' && a.date < today));
+
+    setRecordsUnlocked(false);
+    setAppointments(cleanedAppts);
+    setRecords(recs);
+    setNotifications(notifs);
+    const savedCode = await getPasscode(userId);
+    setPasscodeEnabled(!!savedCode);
+
+    await saveLastUserId(userId);
     setUser(userData);
     setIsLoggedIn(true);
     await saveUser(userData);
@@ -120,13 +149,11 @@ export const AppProvider = ({ children }) => {
     const savedUser = { ...userData };
     delete savedUser.password;
     setRecordsUnlocked(false);
-    // New account starts with empty data
+    setPasscodeEnabled(false);
+    // Tài khoản mới có vùng dữ liệu riêng (per-user key) — mặc định rỗng
     setAppointments([]);
     setRecords([]);
     setNotifications([]);
-    await saveAppointments([]);
-    await saveRecords([]);
-    await saveNotifications([]);
     await saveLastUserId(newId);
     setUser(savedUser);
     setIsLoggedIn(true);
@@ -158,19 +185,22 @@ export const AppProvider = ({ children }) => {
   };
 
   const enablePasscode = async (code) => {
-    await savePasscode(code);
+    if (!user?.id) return;
+    await savePasscode(user.id, code);
     setPasscodeEnabled(true);
     setRecordsUnlocked(false);
   };
 
   const verifyPasscode = async (code) => {
-    const saved = await getPasscode();
+    if (!user?.id) return false;
+    const saved = await getPasscode(user.id);
     if (saved === code) { setRecordsUnlocked(true); return true; }
     return false;
   };
 
   const disablePasscode = async () => {
-    await savePasscode(null);
+    if (!user?.id) return;
+    await savePasscode(user.id, null);
     setPasscodeEnabled(false);
     setRecordsUnlocked(false);
   };
@@ -195,6 +225,7 @@ export const AppProvider = ({ children }) => {
   };
 
   const bookAppointment = async (appointmentData) => {
+    if (!user?.id) throw new Error('not_logged_in');
     // Guard: bác sĩ chỉ khám 1 bệnh nhân / giờ
     const slotTaken = globalBookings.some(
       b => b.doctorId === appointmentData.doctorId &&
@@ -223,14 +254,13 @@ export const AppProvider = ({ children }) => {
     };
     const updated = [...appointments, newAppt];
     setAppointments(updated);
-    await saveAppointments(updated);
+    await saveAppointments(user.id, updated);
 
     const newBooking = { doctorId: appointmentData.doctorId, date: appointmentData.date, time: appointmentData.time, appointmentId: newAppt.id };
     const updatedGlobal = [...globalBookings, newBooking];
     setGlobalBookings(updatedGlobal);
     await saveGlobalBookings(updatedGlobal);
 
-    // Add notification
     const notif = {
       id: generateId(),
       type: 'confirm',
@@ -246,11 +276,12 @@ export const AppProvider = ({ children }) => {
   };
 
   const cancelAppointment = async (id) => {
+    if (!user?.id) return;
     const updated = appointments.map(a =>
       a.id === id ? { ...a, status: 'cancelled' } : a
     );
     setAppointments(updated);
-    await saveAppointments(updated);
+    await saveAppointments(user.id, updated);
 
     const updatedGlobal = globalBookings.filter(b => b.appointmentId !== id);
     setGlobalBookings(updatedGlobal);
@@ -270,11 +301,33 @@ export const AppProvider = ({ children }) => {
   };
 
   const rescheduleAppointment = async (id, newDate, newTime) => {
+    if (!user?.id) throw new Error('not_logged_in');
+    const current = appointments.find(a => a.id === id);
+    if (!current) throw new Error('not_found');
+
+    // Guard: bác sĩ chỉ khám 1 bệnh nhân / giờ — bỏ qua chính lịch đang đổi
+    const slotTaken = globalBookings.some(
+      b => b.doctorId === current.doctorId &&
+           b.date === newDate &&
+           b.time === newTime &&
+           b.appointmentId !== id
+    );
+    if (slotTaken) throw new Error('slot_taken');
+
+    // Guard: user không có 2 lịch cùng giờ — bỏ qua chính lịch đang đổi
+    const timeConflict = appointments.some(
+      a => a.status === 'upcoming' &&
+           a.date === newDate &&
+           a.time === newTime &&
+           a.id !== id
+    );
+    if (timeConflict) throw new Error('time_conflict');
+
     const updated = appointments.map(a =>
       a.id === id ? { ...a, date: newDate, time: newTime } : a
     );
     setAppointments(updated);
-    await saveAppointments(updated);
+    await saveAppointments(user.id, updated);
 
     const updatedGlobal = globalBookings.map(b =>
       b.appointmentId === id ? { ...b, date: newDate, time: newTime } : b
@@ -296,15 +349,15 @@ export const AppProvider = ({ children }) => {
   };
 
   const completeAppointment = async (id) => {
+    if (!user?.id) return;
     const appt = appointments.find(a => a.id === id);
     if (!appt) return;
     const updated = appointments.map(a =>
       a.id === id ? { ...a, status: 'completed' } : a
     );
     setAppointments(updated);
-    await saveAppointments(updated);
+    await saveAppointments(user.id, updated);
 
-    // Create medical record
     const record = {
       id: generateId(),
       appointmentId: id,
@@ -319,26 +372,38 @@ export const AppProvider = ({ children }) => {
     };
     const updatedRecords = [...records, record];
     setRecords(updatedRecords);
-    await saveRecords(updatedRecords);
+    await saveRecords(user.id, updatedRecords);
     return record;
   };
 
+  const rateAppointment = async (id, rating, comment) => {
+    if (!user?.id) return;
+    const updated = appointments.map(a =>
+      a.id === id ? { ...a, rating, comment: comment || '', ratedAt: new Date().toISOString() } : a
+    );
+    setAppointments(updated);
+    await saveAppointments(user.id, updated);
+  };
+
   const addNotification = async (notif) => {
+    if (!user?.id) return;
     const updated = [notif, ...notifications];
     setNotifications(updated);
-    await saveNotifications(updated);
+    await saveNotifications(user.id, updated);
   };
 
   const markNotificationRead = async (id) => {
+    if (!user?.id) return;
     const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
     setNotifications(updated);
-    await saveNotifications(updated);
+    await saveNotifications(user.id, updated);
   };
 
   const markAllRead = async () => {
+    if (!user?.id) return;
     const updated = notifications.map(n => ({ ...n, read: true }));
     setNotifications(updated);
-    await saveNotifications(updated);
+    await saveNotifications(user.id, updated);
   };
 
   const updateSettings = async (newSettings) => {
@@ -368,7 +433,7 @@ export const AppProvider = ({ children }) => {
         settings, unreadCount, globalBookings,
         login, register, logout, updateUser, changePassword, resetPassword,
         passcodeEnabled, recordsUnlocked, enablePasscode, verifyPasscode, disablePasscode, lockRecords,
-        bookAppointment, cancelAppointment, rescheduleAppointment, completeAppointment,
+        bookAppointment, cancelAppointment, rescheduleAppointment, completeAppointment, rateAppointment,
         addNotification, markNotificationRead, markAllRead, updateSettings,
         getUpcomingAppointments, getCompletedAppointments, getCancelledAppointments,
         getRecordByAppointment,

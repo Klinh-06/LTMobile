@@ -2,12 +2,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const KEYS = {
   USER: 'medicare_user',
-  APPOINTMENTS: 'medicare_appointments',
-  RECORDS: 'medicare_records',
-  NOTIFICATIONS: 'medicare_notifications',
   SETTINGS: 'medicare_settings',
   AUTH: 'medicare_auth',
 };
+
+const apptKey = (userId) => `medicare_appointments_${userId}`;
+const recordsKey = (userId) => `medicare_records_${userId}`;
+const notifKey = (userId) => `medicare_notifications_${userId}`;
+const passcodeKey = (userId) => `medicare_passcode_${userId}`;
 
 export const saveUser = async (user) => {
   await AsyncStorage.setItem(KEYS.USER, JSON.stringify(user));
@@ -18,30 +20,36 @@ export const getUser = async () => {
   return data ? JSON.parse(data) : null;
 };
 
-export const saveAppointments = async (appointments) => {
-  await AsyncStorage.setItem(KEYS.APPOINTMENTS, JSON.stringify(appointments));
+export const saveAppointments = async (userId, appointments) => {
+  if (!userId) return;
+  await AsyncStorage.setItem(apptKey(userId), JSON.stringify(appointments));
 };
 
-export const getAppointments = async () => {
-  const data = await AsyncStorage.getItem(KEYS.APPOINTMENTS);
+export const getAppointments = async (userId) => {
+  if (!userId) return [];
+  const data = await AsyncStorage.getItem(apptKey(userId));
   return data ? JSON.parse(data) : [];
 };
 
-export const saveRecords = async (records) => {
-  await AsyncStorage.setItem(KEYS.RECORDS, JSON.stringify(records));
+export const saveRecords = async (userId, records) => {
+  if (!userId) return;
+  await AsyncStorage.setItem(recordsKey(userId), JSON.stringify(records));
 };
 
-export const getRecords = async () => {
-  const data = await AsyncStorage.getItem(KEYS.RECORDS);
+export const getRecords = async (userId) => {
+  if (!userId) return [];
+  const data = await AsyncStorage.getItem(recordsKey(userId));
   return data ? JSON.parse(data) : [];
 };
 
-export const saveNotifications = async (notifications) => {
-  await AsyncStorage.setItem(KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+export const saveNotifications = async (userId, notifications) => {
+  if (!userId) return;
+  await AsyncStorage.setItem(notifKey(userId), JSON.stringify(notifications));
 };
 
-export const getNotifications = async () => {
-  const data = await AsyncStorage.getItem(KEYS.NOTIFICATIONS);
+export const getNotifications = async (userId) => {
+  if (!userId) return [];
+  const data = await AsyncStorage.getItem(notifKey(userId));
   return data ? JSON.parse(data) : [];
 };
 
@@ -95,14 +103,16 @@ export const getGlobalBookings = async () => {
   return data ? JSON.parse(data) : [];
 };
 
-export const savePasscode = async (code) => {
+export const savePasscode = async (userId, code) => {
+  if (!userId) return;
   if (code === null) {
-    await AsyncStorage.removeItem('medicare_passcode');
+    await AsyncStorage.removeItem(passcodeKey(userId));
   } else {
-    await AsyncStorage.setItem('medicare_passcode', code);
+    await AsyncStorage.setItem(passcodeKey(userId), code);
   }
 };
 
-export const getPasscode = async () => {
-  return await AsyncStorage.getItem('medicare_passcode');
+export const getPasscode = async (userId) => {
+  if (!userId) return null;
+  return await AsyncStorage.getItem(passcodeKey(userId));
 };
